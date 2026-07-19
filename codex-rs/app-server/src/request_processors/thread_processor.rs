@@ -4180,11 +4180,6 @@ fn thread_store_list_error(err: ThreadStoreError) -> JSONRPCErrorError {
 
 fn thread_store_resume_read_error(err: ThreadStoreError) -> JSONRPCErrorError {
     match err {
-        ThreadStoreError::InvalidRequest { message }
-            if message.starts_with("no rollout found for thread id ") =>
-        {
-            thread_not_found(message)
-        }
         ThreadStoreError::InvalidRequest { message } => invalid_request(message),
         ThreadStoreError::Unsupported { operation } => {
             unsupported_thread_store_operation(operation)

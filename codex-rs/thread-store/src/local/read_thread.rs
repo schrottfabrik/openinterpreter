@@ -74,9 +74,7 @@ pub(super) async fn read_thread(
 
     let path = resolve_rollout_path(store, thread_id, params.include_archived)
         .await?
-        .ok_or_else(|| ThreadStoreError::InvalidRequest {
-            message: format!("no rollout found for thread id {thread_id}"),
-        })?;
+        .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
 
     let mut thread = read_thread_from_rollout_path(store, path).await?;
     if !params.include_archived && thread.archived_at.is_some() {
@@ -638,12 +636,8 @@ mod tests {
             })
             .await
             .expect_err("active-only read should fail for archived rollout");
-        let ThreadStoreError::InvalidRequest { message } = active_only_err else {
-            panic!("expected invalid request error");
-        };
-        assert_eq!(
-            message,
-            format!("no rollout found for thread id {thread_id}")
+        assert!(
+            matches!(active_only_err, ThreadStoreError::ThreadNotFound { thread_id: missing } if missing == thread_id)
         );
 
         let thread = store
@@ -1270,12 +1264,8 @@ mod tests {
             })
             .await
             .expect_err("active-only read should fail for archived metadata");
-        let ThreadStoreError::InvalidRequest { message } = active_only_err else {
-            panic!("expected invalid request error");
-        };
-        assert_eq!(
-            message,
-            format!("no rollout found for thread id {thread_id}")
+        assert!(
+            matches!(active_only_err, ThreadStoreError::ThreadNotFound { thread_id: missing } if missing == thread_id)
         );
 
         let thread = store
@@ -1355,12 +1345,8 @@ mod tests {
             .await
             .expect_err("read should fail without rollout");
 
-        let ThreadStoreError::InvalidRequest { message } = err else {
-            panic!("expected invalid request error");
-        };
-        assert_eq!(
-            message,
-            format!("no rollout found for thread id {thread_id}")
+        assert!(
+            matches!(err, ThreadStoreError::ThreadNotFound { thread_id: missing } if missing == thread_id)
         );
     }
 }

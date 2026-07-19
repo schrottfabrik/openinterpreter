@@ -1173,15 +1173,9 @@ impl ThreadManagerState {
                 ThreadStoreError::ThreadNotFound { thread_id } => {
                     CodexErr::ThreadNotFound(thread_id)
                 }
-                ThreadStoreError::InvalidRequest { message } => {
-                    if message.starts_with("no rollout found for thread id ") {
-                        CodexErr::ThreadNotFound(thread_id)
-                    } else {
-                        CodexErr::Fatal(format!(
-                            "failed to read stored thread {thread_id}: invalid thread-store request: {message}"
-                        ))
-                    }
-                }
+                ThreadStoreError::InvalidRequest { message } => CodexErr::Fatal(format!(
+                    "failed to read stored thread {thread_id}: invalid thread-store request: {message}"
+                )),
                 err => CodexErr::Fatal(format!("failed to read stored thread {thread_id}: {err}")),
             })
     }
