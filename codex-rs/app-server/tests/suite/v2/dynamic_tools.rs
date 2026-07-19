@@ -18,6 +18,8 @@ use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ThreadForkParams;
+use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
@@ -166,6 +168,110 @@ async fn thread_start_normalizes_legacy_dynamic_tools_into_model_request() -> Re
     );
 
     Ok(())
+}
+
+#[tokio::test]
+async fn thread_fork_replaces_the_persisted_dynamic_tool_catalog() -> Result<()> {
+    let responses = vec![
+        create_final_assistant_message_sse_response("Source done")?,
+        create_final_assistant_message_sse_response("Fork done")?,
+    ];
+    let server = create_mock_responses_server_sequence_unchecked(responses).await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build()
+        .await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let start_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            dynamic_tools: Some(vec![make_dynamic_tool("supabase_manage")]),
+            ..Default::default()
+        })
+        .await?;
+    let start_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread: source, .. } =
+        to_response::<ThreadStartResponse>(start_response)?;
+
+    let source_turn_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: source.id.clone(),
+            input: vec![V2UserInput::Text {
+                text: "Inspect the database".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let source_turn_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(source_turn_id)),
+    )
+    .await??;
+    let _source_turn: TurnStartResponse = to_response::<TurnStartResponse>(source_turn_response)?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let fork_id = mcp
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: source.id,
+            dynamic_tools: Some(vec![make_dynamic_tool("superwall_manage")]),
+            ..Default::default()
+        })
+        .await?;
+    let fork_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(fork_id)),
+    )
+    .await??;
+    let ThreadForkResponse { thread: forked, .. } =
+        to_response::<ThreadForkResponse>(fork_response)?;
+
+    let turn_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: forked.id,
+            input: vec![V2UserInput::Text {
+                text: "Inspect monetization".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
+    )
+    .await??;
+    let _turn: TurnStartResponse = to_response::<TurnStartResponse>(turn_response)?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let bodies = responses_bodies(&server).await?;
+    assert!(find_tool(&bodies[1], "superwall_manage").is_some());
+    assert!(find_tool(&bodies[1], "supabase_manage").is_none());
+    Ok(())
+}
+
+fn make_dynamic_tool(name: &str) -> DynamicToolSpec {
+    DynamicToolSpec::Function(DynamicToolFunctionSpec {
+        name: name.to_string(),
+        description: format!("Manage {name}"),
+        input_schema: json!({ "type": "object", "additionalProperties": false }),
+        defer_loading: false,
+    })
 }
 
 #[tokio::test]

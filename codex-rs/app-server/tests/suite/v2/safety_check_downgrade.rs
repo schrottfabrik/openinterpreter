@@ -175,6 +175,87 @@ async fn cyber_policy_response_emits_typed_error_notification_v2() -> Result<()>
 }
 
 #[tokio::test]
+async fn payment_required_response_preserves_http_status_in_error_notification_v2() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let response = ResponseTemplate::new(402).set_body_json(serde_json::json!({
+        "error": {
+            "message": "Insufficient credits.",
+            "type": "billing_error",
+            "param": null,
+            "code": "insufficient_credits"
+        }
+    }));
+    let _response_mock = responses::mount_response_once(&server, response).await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build()
+        .await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let thread_req = mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            model: Some(REQUESTED_MODEL.to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let thread_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
+
+    let turn_req = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            client_user_message_id: None,
+            input: vec![UserInput::Text {
+                text: "trigger billing error".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
+    )
+    .await??;
+    let turn_start: TurnStartResponse = to_response(turn_resp)?;
+
+    let error = collect_error_with_info(
+        &mut mcp,
+        CodexErrorInfo::UnexpectedHttpStatus {
+            http_status_code: 402,
+        },
+    )
+    .await?;
+    assert_eq!(
+        error,
+        ErrorNotification {
+            error: codex_app_server_protocol::TurnError {
+                message: "Insufficient credits.".to_string(),
+                codex_error_info: Some(CodexErrorInfo::UnexpectedHttpStatus {
+                    http_status_code: 402,
+                }),
+                additional_details: None,
+            },
+            will_retry: false,
+            thread_id: thread.id,
+            turn_id: turn_start.turn.id,
+        }
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn response_model_field_mismatch_emits_model_rerouted_notification_v2_when_header_matches_requested()
 -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -526,6 +607,33 @@ async fn collect_cyber_policy_error_and_validate_no_reroute(
                 return error.ok_or_else(|| {
                     anyhow::anyhow!("expected cyber policy error before turn/completed")
                 });
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn collect_error_with_info(
+    mcp: &mut TestAppServer,
+    expected_info: CodexErrorInfo,
+) -> Result<ErrorNotification> {
+    loop {
+        let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
+        let JSONRPCMessage::Notification(notification) = message else {
+            continue;
+        };
+        match notification.method.as_str() {
+            "error" => {
+                let params = notification
+                    .params
+                    .ok_or_else(|| anyhow::anyhow!("error notifications must include params"))?;
+                let payload: ErrorNotification = serde_json::from_value(params)?;
+                if payload.error.codex_error_info.as_ref() == Some(&expected_info) {
+                    return Ok(payload);
+                }
+            }
+            "turn/completed" => {
+                anyhow::bail!("expected typed error notification before turn/completed");
             }
             _ => {}
         }

@@ -14,6 +14,7 @@ use app_test_support::test_absolute_path;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
 use chrono::Utc;
+use codex_app_server::THREAD_NOT_FOUND_ERROR_CODE;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
@@ -196,6 +197,7 @@ async fn thread_resume_rejects_unmaterialized_thread() -> Result<()> {
         mcp.read_stream_until_error_message(RequestId::Integer(resume_id)),
     )
     .await??;
+    assert_eq!(resume_err.error.code, THREAD_NOT_FOUND_ERROR_CODE);
     assert!(
         resume_err
             .error

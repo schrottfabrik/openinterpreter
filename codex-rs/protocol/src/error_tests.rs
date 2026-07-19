@@ -113,6 +113,27 @@ fn server_overloaded_maps_to_protocol() {
 }
 
 #[test]
+fn unexpected_http_status_maps_to_protocol_with_status_code() {
+    let err = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+        status: StatusCode::PAYMENT_REQUIRED,
+        body: "Insufficient credits.".to_string(),
+        user_message: Some("Insufficient credits.".to_string()),
+        url: None,
+        cf_ray: None,
+        request_id: None,
+        identity_authorization_error: None,
+        identity_error_code: None,
+    });
+
+    assert_eq!(
+        err.to_codex_protocol_error(),
+        CodexErrorInfo::UnexpectedHttpStatus {
+            http_status_code: StatusCode::PAYMENT_REQUIRED.as_u16(),
+        }
+    );
+}
+
+#[test]
 fn sandbox_denied_uses_aggregated_output_when_stderr_empty() {
     let output = ExecToolCallOutput {
         exit_code: 77,

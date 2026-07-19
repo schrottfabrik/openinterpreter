@@ -1,5 +1,6 @@
 use super::*;
 use crate::error_code::method_not_found;
+use crate::error_code::thread_not_found;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_extension_api::ExtensionDataInit;
 use codex_protocol::config_types::MultiAgentMode;
@@ -2275,9 +2276,7 @@ impl ThreadRequestProcessor {
                 // from the ThreadStore.
                 thread
             } else {
-                return Err(ThreadReadViewError::InvalidRequest(format!(
-                    "thread not loaded: {thread_id}"
-                )));
+                return Err(ThreadReadViewError::MissingThread(thread_id));
             }
         } else if let Some(thread) = self
             .load_persisted_thread_for_read(thread_id, include_turns)
@@ -2296,9 +2295,7 @@ impl ThreadRequestProcessor {
             )
             .await?
         } else {
-            return Err(ThreadReadViewError::InvalidRequest(format!(
-                "thread not loaded: {thread_id}"
-            )));
+            return Err(ThreadReadViewError::MissingThread(thread_id));
         };
 
         let has_live_in_progress_turn = if let Some(loaded_thread) = loaded_thread.as_ref() {
@@ -3458,6 +3455,7 @@ impl ThreadRequestProcessor {
             service_tier,
             cwd,
             runtime_workspace_roots,
+            dynamic_tools,
             approval_policy,
             approvals_reviewer,
             sandbox,
@@ -3474,6 +3472,10 @@ impl ThreadRequestProcessor {
             return Err(invalid_request(
                 "`permissions` cannot be combined with `sandbox`",
             ));
+        }
+        let dynamic_tools = dynamic_tools.unwrap_or_default();
+        if !dynamic_tools.is_empty() {
+            validate_dynamic_tools(&dynamic_tools).map_err(invalid_request)?;
         }
         let mut source_thread = self
             .read_stored_thread_for_resume(&thread_id, path.as_ref(), /*include_history*/ true)
@@ -3556,7 +3558,7 @@ impl ThreadRequestProcessor {
             ..
         } = self
             .thread_manager
-            .fork_thread_from_history(
+            .fork_thread_from_history_with_tools(
                 ForkSnapshot::Interrupted,
                 config,
                 InitialHistory::Resumed(ResumedHistory {
@@ -3565,6 +3567,7 @@ impl ThreadRequestProcessor {
                     rollout_path: source_thread.rollout_path.clone(),
                 }),
                 thread_source.map(Into::into),
+                dynamic_tools,
                 self.request_trace_context(&request_id).await,
                 supports_openai_form_elicitation,
             )
@@ -4143,6 +4146,7 @@ fn normalize_thread_turns_status(
 
 enum ThreadReadViewError {
     InvalidRequest(String),
+    MissingThread(ThreadId),
     Unsupported(&'static str),
     Internal(String),
 }
@@ -4150,6 +4154,9 @@ enum ThreadReadViewError {
 fn thread_read_view_error(err: ThreadReadViewError) -> JSONRPCErrorError {
     match err {
         ThreadReadViewError::InvalidRequest(message) => invalid_request(message),
+        ThreadReadViewError::MissingThread(thread_id) => {
+            thread_not_found(format!("thread not found: {thread_id}"))
+        }
         ThreadReadViewError::Unsupported(operation) => {
             unsupported_thread_store_operation(operation)
         }
@@ -4173,12 +4180,17 @@ fn thread_store_list_error(err: ThreadStoreError) -> JSONRPCErrorError {
 
 fn thread_store_resume_read_error(err: ThreadStoreError) -> JSONRPCErrorError {
     match err {
+        ThreadStoreError::InvalidRequest { message }
+            if message.starts_with("no rollout found for thread id ") =>
+        {
+            thread_not_found(message)
+        }
         ThreadStoreError::InvalidRequest { message } => invalid_request(message),
         ThreadStoreError::Unsupported { operation } => {
             unsupported_thread_store_operation(operation)
         }
         ThreadStoreError::ThreadNotFound { thread_id } => {
-            invalid_request(format!("no rollout found for thread id {thread_id}"))
+            thread_not_found(format!("no rollout found for thread id {thread_id}"))
         }
         err => internal_error(format!("failed to read thread: {err}")),
     }
@@ -4214,15 +4226,11 @@ fn thread_read_history_load_error(
         ThreadStoreError::InvalidRequest { message }
             if message.starts_with("failed to resolve rollout path `") =>
         {
-            ThreadReadViewError::InvalidRequest(format!(
-                "thread {thread_id} is not materialized yet; includeTurns is unavailable before first user message"
-            ))
+            ThreadReadViewError::MissingThread(thread_id)
         }
         ThreadStoreError::ThreadNotFound {
             thread_id: missing_thread_id,
-        } if missing_thread_id == thread_id => ThreadReadViewError::InvalidRequest(format!(
-            "thread {thread_id} is not materialized yet; includeTurns is unavailable before first user message"
-        )),
+        } if missing_thread_id == thread_id => ThreadReadViewError::MissingThread(thread_id),
         ThreadStoreError::InvalidRequest { message } => {
             ThreadReadViewError::InvalidRequest(message)
         }
@@ -4281,7 +4289,7 @@ fn conversation_summary_rollout_path_read_error(
 pub(super) fn core_thread_write_error(operation: &str, err: CodexErr) -> JSONRPCErrorError {
     match err {
         CodexErr::ThreadNotFound(thread_id) => {
-            invalid_request(format!("thread not found: {thread_id}"))
+            thread_not_found(format!("thread not found: {thread_id}"))
         }
         CodexErr::InvalidRequest(message) => invalid_request(message),
         CodexErr::UnsupportedOperation(message) => method_not_found(message),

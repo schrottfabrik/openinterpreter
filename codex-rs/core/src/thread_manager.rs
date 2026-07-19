@@ -1010,6 +1010,33 @@ impl ThreadManager {
             config,
             history,
             thread_source,
+            Vec::new(),
+            parent_trace,
+            supports_openai_form_elicitation,
+        )
+        .await
+    }
+
+    /// Fork an existing thread while replacing the dynamic tools restored from its history.
+    pub async fn fork_thread_from_history_with_tools<S>(
+        &self,
+        snapshot: S,
+        config: Config,
+        history: InitialHistory,
+        thread_source: Option<ThreadSource>,
+        dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
+        parent_trace: Option<W3cTraceContext>,
+        supports_openai_form_elicitation: bool,
+    ) -> CodexResult<NewThread>
+    where
+        S: Into<ForkSnapshot>,
+    {
+        self.fork_thread_with_initial_history(
+            snapshot.into(),
+            config,
+            history,
+            thread_source,
+            dynamic_tools,
             parent_trace,
             supports_openai_form_elicitation,
         )
@@ -1022,6 +1049,7 @@ impl ThreadManager {
         config: Config,
         history: InitialHistory,
         thread_source: Option<ThreadSource>,
+        dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         parent_trace: Option<W3cTraceContext>,
         supports_openai_form_elicitation: bool,
     ) -> CodexResult<NewThread> {
@@ -1058,7 +1086,7 @@ impl ThreadManager {
             /*parent_thread_id*/ None,
             source_thread_id,
             thread_source,
-            Vec::new(),
+            dynamic_tools,
             /*metrics_service_name*/ None,
             parent_trace,
             environments,

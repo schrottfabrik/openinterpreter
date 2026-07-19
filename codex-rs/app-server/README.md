@@ -1431,6 +1431,7 @@ There are additional item-specific events:
 - `ResponseStreamConnectionFailed { httpStatusCode? }`: failure to connect to the response SSE stream
 - `ResponseStreamDisconnected { httpStatusCode? }`: disconnect of the response SSE stream in the middle of a turn before completion
 - `ResponseTooManyFailedAttempts { httpStatusCode? }`
+- `UnexpectedHttpStatus { httpStatusCode }`: an upstream API returned a non-success HTTP response; clients can use the status for product-specific recovery UI
 - `ActiveTurnNotSteerable { turnKind }`: `turn/start` or `turn/steer` was submitted while the
   current active turn was not steerable, for example `/review` or manual `/compact`
 - `BadRequest`

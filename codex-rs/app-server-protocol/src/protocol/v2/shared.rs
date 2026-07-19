@@ -102,6 +102,12 @@ pub enum CodexErrorInfo {
         #[ts(rename = "httpStatusCode")]
         http_status_code: Option<u16>,
     },
+    /// The upstream API returned a non-success HTTP response.
+    UnexpectedHttpStatus {
+        #[serde(rename = "httpStatusCode")]
+        #[ts(rename = "httpStatusCode")]
+        http_status_code: u16,
+    },
     /// Returned when `turn/start` or `turn/steer` is submitted while the current active turn
     /// cannot accept same-turn steering, for example `/review` or manual `/compact`.
     ActiveTurnNotSteerable {
@@ -136,6 +142,9 @@ impl From<CoreCodexErrorInfo> for CodexErrorInfo {
             }
             CoreCodexErrorInfo::ResponseTooManyFailedAttempts { http_status_code } => {
                 CodexErrorInfo::ResponseTooManyFailedAttempts { http_status_code }
+            }
+            CoreCodexErrorInfo::UnexpectedHttpStatus { http_status_code } => {
+                CodexErrorInfo::UnexpectedHttpStatus { http_status_code }
             }
             CoreCodexErrorInfo::ActiveTurnNotSteerable { turn_kind } => {
                 CodexErrorInfo::ActiveTurnNotSteerable {

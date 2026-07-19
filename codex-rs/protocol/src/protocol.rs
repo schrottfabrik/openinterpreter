@@ -1765,6 +1765,10 @@ pub enum CodexErrorInfo {
     ResponseTooManyFailedAttempts {
         http_status_code: Option<u16>,
     },
+    /// The upstream API returned a non-success HTTP response.
+    UnexpectedHttpStatus {
+        http_status_code: u16,
+    },
     /// Returned when `turn/start` or `turn/steer` is submitted while the current active turn
     /// cannot accept same-turn steering, for example `/review` or manual `/compact`.
     ActiveTurnNotSteerable {
@@ -1792,6 +1796,7 @@ impl CodexErrorInfo {
             | Self::SandboxError
             | Self::ResponseStreamDisconnected { .. }
             | Self::ResponseTooManyFailedAttempts { .. }
+            | Self::UnexpectedHttpStatus { .. }
             | Self::Other => true,
         }
     }
