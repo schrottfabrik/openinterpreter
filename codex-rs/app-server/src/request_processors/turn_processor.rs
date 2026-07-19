@@ -1243,6 +1243,7 @@ impl TurnRequestProcessor {
                     rollout_path: parent_thread.rollout_path(),
                 }),
                 /*thread_source*/ None,
+                /*dynamic_tools*/ Vec::new(),
                 self.request_trace_context(request_id).await,
                 /*supports_openai_form_elicitation*/ false,
             )
